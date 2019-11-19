@@ -175,192 +175,110 @@ func (rErr RunnerErr) Error() string {
 	return fmt.Sprintf("Runner %d: %s", rErr.id, rErr.err)
 }
 
-func (r *Runner) msg(sig int) error {
-	r.msgChan <- RunnerMsg{r.id, sig}
-	return <-r.msgErrChan
+// Lock() locks Runner and forces to wait until rm.msgReceiver is ready
+// to receive messages
+func (r *Runner) Lock() {
+	r.msgChan <- r.id
 }
 
-func (r *Runner) msgPauseOthers() error {
-	return r.msg(sigPauseOthers)
-}
-
-func (r *Runner) msgResumeOthers() error {
-	return r.msg(sigResumeOthers)
-}
-
-type ContextAndCancel struct {
-	context.Context
-	context.CancelFunc
+// Unlock() empties
+func (r *Runner) Unlock() {
+	go func() {
+		<-r.pauseChan
+	}()
 }
 
 // RunnersManager controls flow of Runners
 type RunnersManager struct {
-	runners            []*Runner
-	cancelableContexts []ContextAndCancel
-	msgReceiver        chan RunnerMsg
+	runners     []*Runner
+	cancelFuncs []context.CancelFunc
+	msgReceiver chan int
+	biggestId   int
+	failSafe    bool
 }
 
-const (
-	sigPauseOthers = iota
-	sigResumeOthers
-)
-
-func (rm *RunnersManager) boundsCheck(id int) error {
-	if id < 0 || id > cap(rm.cancelableContexts) {
-		return fmt.Errorf("runner with id %d doesn't exist", id)
+func NewRunnersManager() *RunnersManager {
+	return &RunnersManager{
+		msgReceiver: make(chan int),
 	}
-	return nil
 }
 
-func NewRunnersManager(N int, opts ...[]RunnerOption) (*RunnersManager, error) {
-	if len(opts) > N {
-		return nil, fmt.Errorf("options length can't be larger than runners length")
-	}
-
-	rm := &RunnersManager{
-		runners:     make([]*Runner, N),
-		msgReceiver: make(chan RunnerMsg),
-	}
-
-	rI := 0
-	// creating runners with options
-	for ; rI < len(opts); rI++ {
-		opts[rI] = append(opts[rI], Async(rI, rm.msgReceiver))
-		r, err := New(opts[rI]...)
-		if err != nil {
-			return nil, err
-		}
-		rm.runners[rI] = r
-	}
-	// creating runners without options
-	for ; rI < N; rI++ {
-		r, err := New(Async(rI, rm.msgReceiver))
-		if err != nil {
-			return nil, err
-		}
-		rm.runners[rI] = r
-	}
-	return rm, nil
+func (rm *RunnersManager) AddRunner(r *Runner) {
+	rm.runners = append(rm.runners, r)
 }
 
 var (
-	closedCtxErr = errors.New("context closed")
+	errNoRunners = errors.New("no runners added")
 )
 
-func (rm *RunnersManager) PauseAllExcept(exceptId int) error {
-	if err := rm.boundsCheck(exceptId); err != nil {
-		return err
-	}
-
-	for i := 0; i < exceptId; i++ {
-		ctx := rm.cancelableContexts[i].Context
-		select {
-		case <-ctx.Done():
-			return closedCtxErr
-		default:
-			err := ctx.(asyncable).Pause()
-			if err != nil {
-				return err
-			}
-		}
-	}
-	for i := exceptId + 1; i < len(rm.cancelableContexts); i++ {
-		ctx := rm.cancelableContexts[i].Context
-		select {
-		case <-ctx.Done():
-			return closedCtxErr
-		default:
-			err := ctx.(asyncable).Pause()
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
+// pauseHandler blocks main goroutine which makes
+// dealing with other runners impossible, so it just hangs
+func (rm *RunnersManager) pauseHandler(id int) {
+	rm.runners[id].pauseChan <- struct{}{}
 }
 
-func (rm *RunnersManager) ResumeAllExcept(exceptId int) error {
-	if err := rm.boundsCheck(exceptId); err != nil {
-		return err
-	}
-	for i := 0; i < exceptId; i++ {
-		ctx := rm.cancelableContexts[i].Context
-		select {
-		case <-ctx.Done():
-			return closedCtxErr
-		default:
-			err := ctx.(asyncable).Unpause()
-			if err != nil {
-				return err
-			}
-		}
-	}
-	for i := exceptId + 1; i < len(rm.cancelableContexts); i++ {
-		ctx := rm.cancelableContexts[i].Context
-		select {
-		case <-ctx.Done():
-			return closedCtxErr
-		default:
-			err := ctx.(asyncable).Unpause()
-			if err != nil {
-				return err
-			}
-		}
+// RunAll balances given nodes between Runners and runs nodes concurrently
+func (rm *RunnersManager) RunAll(ctx context.Context, nodes ...syntax.Node) error {
+	if len(rm.runners) == 0 {
+		return errNoRunners
 	}
 
-	return nil
-}
-
-func (rm *RunnersManager) msgHandler(msg RunnerMsg) {
-	router := map[int]func(int) error{
-		sigPauseOthers:  rm.PauseAllExcept,
-		sigResumeOthers: rm.ResumeAllExcept,
-	}
-
-	if handler, exists := router[msg.signal]; !exists {
-		panic("unknown message signal")
-	} else {
-		rm.runners[msg.id].msgErrChan <- handler(msg.id)
-	}
-}
-
-func (rm *RunnersManager) RunAll(ctx context.Context, nodes ...syntax.Node) []error {
 	finished := 0
 	errs := make([]error, len(nodes))
 	errChan := make(chan RunnerErr, len(errs))
-	rm.cancelableContexts = make([]ContextAndCancel, len(rm.runners))
+	rm.cancelFuncs = make([]context.CancelFunc, len(rm.runners))
 	rI := 0
+
+	taskPoll := make([][]syntax.Node, len(rm.runners))
+
 	for _, node := range nodes {
-		actx, cancelFunc := WithAsync(ctx)
-		go func(_ctx context.Context, i int, n syntax.Node) {
-			errChan <- RunnerErr{i, rm.runners[i].Run(_ctx, n)}
-		}(actx, rI, node)
+		taskPoll[rI] = make([]syntax.Node, 1)
+		taskPoll[rI][len(taskPoll[rI])-1] = node
 
-		rm.cancelableContexts[rI] = ContextAndCancel{actx, cancelFunc}
-
-		if rI+1 < len(rm.runners) {
-			rI++
-		} else {
+		rI++
+		if rI >= len(rm.runners) {
 			rI = 0
 		}
 	}
 
-	//fmt.Printf("outside: %p\n", rm.msgReceiver)
+	for i, tasks := range taskPoll {
+		newCtx, cancelFunc := context.WithCancel(ctx)
+		rm.cancelFuncs[i] = cancelFunc
+		go func(tasksCtx context.Context, rI int, nodes []syntax.Node) {
+			for _, n := range nodes {
+				rm.runners[rI].Reset()
+				errChan <- RunnerErr{rI, rm.runners[rI].Run(tasksCtx, n)}
+			}
+		}(newCtx, i, tasks)
+	}
 
+	var errBuff strings.Builder
 	for finished < len(nodes) {
 		select {
 		case cRErr := <-errChan:
-			errs[cRErr.id] = cRErr.err
-			rm.cancelableContexts[cRErr.id].CancelFunc()
+			if cRErr.err != nil {
+				if rm.failSafe {
+					for _, cancelFunc := range rm.cancelFuncs {
+						cancelFunc()
+					}
+					return cRErr.err
+				} else {
+					errBuff.WriteString(fmt.Sprintf("runner %v, error: %v\n", cRErr.id, cRErr.err))
+				}
+			}
 			finished++
 		case cRMsg := <-rm.msgReceiver:
-			rm.msgHandler(cRMsg)
+			rm.pauseHandler(cRMsg)
 		}
 	}
 
-	return errs
+	if errBuff.Len() == 0 {
+		return nil
+	}
+
+	return errors.New(errBuff.String())
 }
+
 
 // expandEnv exposes Runner's variables to the expand package.
 type expandEnv struct {
@@ -387,14 +305,14 @@ func (e expandEnv) Each(fn func(name string, vr expand.Variable) bool) {
 	}
 }
 
-// Async sets Runner to async mode
-func Async(id int, controlChan chan<- RunnerMsg) RunnerOption {
+// Manager passes RunnersManager reference to fill in Runner necessary
+// information about channels and communication
+func Manager(rm *RunnersManager) RunnerOption {
 	return func(r *Runner) error {
-		r.id = id
-		r.asyncMode = true
-		r.execHandler = DefaultAsyncExecHandler(2 * time.Second)
-		r.msgChan = controlChan
-		r.msgErrChan = make(chan error)
+		r.msgChan = rm.msgReceiver
+		r.pauseChan = make(chan struct{})
+		r.id = rm.biggestId
+		rm.biggestId++
 		return nil
 	}
 }
@@ -628,16 +546,12 @@ type Runner struct {
 	// io.PipeReader does not implement io.WriterTo.
 	bufCopier bufCopier
 
-	// asyncMode marks if Runner is about to run concurrently. Consider that
-	// by default as it is false - scripts run in sync mode.
-	asyncMode bool
-
 	// msgChan channel sends signals to RunnersManager, in order to pause
-	// and resume other Runners.
-	msgChan chan<- RunnerMsg
+	// main goroutine
+	msgChan chan<- int
 
-	// errSig channel receives errors after sending a msg.
-	msgErrChan chan error
+	// pauseChan channel controls execution of runnersManager.
+	pauseChan chan struct{}
 
 	// Id of the Runner.
 	id int
@@ -764,7 +678,7 @@ func (r *Runner) Reset() {
 		bufCopier: r.bufCopier,
 
 		msgChan:    r.msgChan,
-		msgErrChan: r.msgErrChan,
+		pauseChan:  r.pauseChan,
 		id:         r.id,
 	}
 	if r.Vars == nil {

@@ -298,20 +298,9 @@ func (r *Runner) builtinCode(ctx context.Context, pos syntax.Pos, name string, a
 		}
 		return oneIf(r.bashTest(ctx, expr, true) == "")
 	case "sync":
-		if len(args) == 0 {
-			r.keepRedirs = true
-			break
-		}
-		if err := r.msgPauseOthers(); r.asyncMode && err != nil {
-			r.errf("sync: %s", err)
-			return 1
-		}
-		r.exec(ctx, args)
-		if err := r.msgResumeOthers(); r.asyncMode && err != nil {
-			r.errf("sync: %s", err)
-			return 1
-		}
-		r.exitShell = true
+		r.Lock()
+		r.call(ctx, pos, args)
+		r.Unlock()
 		return r.exit
 	case "exec":
 		// TODO: Consider syscall.Exec, i.e. actually replacing

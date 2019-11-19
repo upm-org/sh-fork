@@ -3105,24 +3105,29 @@ func TestRunnerEnvNoModify(t *testing.T) {
 		t.Fatalf("\nwant: %q\ngot:  %q", want, got)
 	}
 }
-/*
+
 func TestNewRunnersManager(t *testing.T) {
 	t.Parallel()
 	file1, file2 := parse(t, nil, `echo test1`), parse(t, nil, `echo test2`)
 
 	var b [2]bytes.Buffer
-	runners, err := NewRunnersManager(2,
-		[]RunnerOption{StdIO(nil, &b[0], &b[0])},
-		[]RunnerOption{StdIO(nil, &b[1], &b[1])})
+	runnersManager := NewRunnersManager()
 
+	firstRunner, err := New(StdIO(nil, &b[0], &b[0]), Manager(runnersManager))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRunner, err := New(StdIO(nil, &b[1], &b[1]), Manager(runnersManager))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for _, err := range runners.RunAll(context.Background(), file1, file2) {
-		if err != nil {
-			t.Fatal(err)
-		}
+	runnersManager.failSafe = true
+	runnersManager.AddRunner(firstRunner)
+	runnersManager.AddRunner(secondRunner)
+
+	if err := runnersManager.RunAll(context.Background(), file1, file2); err != nil {
+		t.Fatal(err)
 	}
 
 	want := [2]string{"test1\n", "test2\n"}
@@ -3137,7 +3142,7 @@ func TestNewRunnersManager(t *testing.T) {
 		t.Fatal(errors.New(errs))
 	}
 }
-*/
+
 func TestRunnersManager_RunAll(t *testing.T) {
 	t.Parallel()
 	file1 := parse(t, nil, `
@@ -3149,19 +3154,25 @@ echo "f2_async1";
 echo "f2_async2";
 sleep 1;
 sync echo "f2_sync"`)
-	var b [2]bytes.Buffer
-	runners, err := NewRunnersManager(2,
-		[]RunnerOption{StdIO(nil, &b[0], &b[0])},
-		[]RunnerOption{StdIO(nil, &b[1], &b[1])})
 
+	var b [2]bytes.Buffer
+	runnersManager := NewRunnersManager()
+
+	firstRunner, err := New(StdIO(nil, &b[0], &b[0]), Manager(runnersManager))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for _, err := range runners.RunAll(context.Background(), file1, file2) {
-		if err != nil {
-			t.Fatal(err)
-		}
+	secondRunner, err := New(StdIO(nil, &b[1], &b[1]), Manager(runnersManager))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runnersManager.AddRunner(firstRunner)
+	runnersManager.AddRunner(secondRunner)
+
+	if err := runnersManager.RunAll(context.Background(), file1, file2); err != nil {
+		t.Fatal(err)
 	}
 
 	want := [2]string{"f1_async1\nf1_async2\nf1_sync\n", "f2_async1\nf2_async2\nf2_sync\n"}
@@ -3173,7 +3184,7 @@ sync echo "f2_sync"`)
 		}
 	}
 	if errs := errBuff.String(); errs != "" {
-		t.Fatal(errors.New(errs))
+		t.Fatalf("%s", errs)
 	}
 }
 
