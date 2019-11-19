@@ -313,6 +313,7 @@ func Manager(rm *RunnersManager) RunnerOption {
 		r.msgChan = rm.msgReceiver
 		r.pauseChan = make(chan struct{})
 		r.id = rm.biggestId
+		r.asyncMode = true
 		rm.biggestId++
 		return nil
 	}
@@ -546,6 +547,9 @@ type Runner struct {
 	// For example, this saves an allocation for every shell pipe, since
 	// io.PipeReader does not implement io.WriterTo.
 	bufCopier bufCopier
+
+	// asyncMode marks if runner is ready to be run concurrently
+	asyncMode bool
 
 	// msgChan channel sends signals to RunnersManager, in order to pause
 	// main goroutine

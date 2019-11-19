@@ -296,6 +296,10 @@ func (r *Runner) builtinCode(ctx context.Context, pos syntax.Pos, name string, a
 		}
 		return oneIf(r.bashTest(ctx, expr, true) == "")
 	case "sync":
+		if !r.asyncMode {
+			r.errf("sync: can't be used in synchronous mode\n")
+			return 1
+		}
 		r.Lock()
 		r.call(ctx, pos, args)
 		r.Unlock()
