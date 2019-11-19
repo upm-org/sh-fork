@@ -263,15 +263,6 @@ func pathExts(env expand.Environ) []string {
 	return exts
 }
 
-func DefaultAsyncExecHandler(killTimeout time.Duration) ExecHandlerFunc {
-	return func(ctx context.Context, args []string) error {
-		if a, ok := ctx.(asyncable); ok {
-			a.Wait()
-		}
-		return DefaultExecHandler(killTimeout)(ctx, args)
-	}
-}
-
 // OpenHandlerFunc is a handler which opens files. It is
 // called for all files that are opened directly by the shell, such as
 // in redirects. Files opened by executed programs are not included.
