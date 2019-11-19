@@ -685,6 +685,7 @@ func (r *Runner) Reset() {
 		msgChan:    r.msgChan,
 		pauseChan:  r.pauseChan,
 		id:         r.id,
+		asyncMode:  r.asyncMode,
 	}
 	if r.Vars == nil {
 		r.Vars = make(map[string]expand.Variable)
