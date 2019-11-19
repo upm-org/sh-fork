@@ -37,7 +37,7 @@ func main() {
 	flag.Var(&concArgs, "a", "files to be executed concurrently (separated by comma)")
 	flag.Parse()
 	err := runAll()
-	if e, ok := err.(interp.ExitStatus); ok {
+	if e, ok := interp.IsExitStatus(err); ok {
 		os.Exit(int(e))
 	}
 	if err != nil {
