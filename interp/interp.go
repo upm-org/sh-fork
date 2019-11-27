@@ -280,7 +280,6 @@ func (rm *RunnersManager) RunAll(ctx context.Context, nodes ...syntax.Node) erro
 	return errors.New(errBuff.String())
 }
 
-
 // expandEnv exposes Runner's variables to the expand package.
 type expandEnv struct {
 	r *Runner
@@ -682,10 +681,10 @@ func (r *Runner) Reset() {
 		usedNew:   r.usedNew,
 		bufCopier: r.bufCopier,
 
-		msgChan:    r.msgChan,
-		pauseChan:  r.pauseChan,
-		id:         r.id,
-		asyncMode:  r.asyncMode,
+		msgChan:   r.msgChan,
+		pauseChan: r.pauseChan,
+		id:        r.id,
+		asyncMode: r.asyncMode,
 	}
 	if r.Vars == nil {
 		r.Vars = make(map[string]expand.Variable)

@@ -163,4 +163,3 @@ func runInteractive(r *interp.Runner, stdin io.Reader, stdout, stderr io.Writer)
 	}
 	return runErr
 }
-
