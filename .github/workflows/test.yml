@@ -48,5 +48,3 @@ jobs:
     - name: fuzz continuous job
       run: export PATH="$PATH:$(go env GOPATH)/bin"; cd _fuzz/it && ./fuzz-ci fuzzing
       if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-      env:
-        FUZZIT_API_KEY: ${{ secrets.FUZZIT_API_KEY }}
