@@ -33,18 +33,18 @@ jobs:
     - name: Test as root, without cgo, and with busybox
       run: docker run -v=$PWD:/pwd golang:1.13-alpine3.10 sh -c 'export CGO_ENABLED=0; cd /pwd && go test ./...'
 
-  fuzz:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Install Go
-      uses: actions/setup-go@v1
-      with:
-        go-version: 1.13.x
-    - name: Checkout code
-      uses: actions/checkout@v1
+#  fuzz:
+#    runs-on: ubuntu-latest
+#    steps:
+#    - name: Install Go
+#      uses: actions/setup-go@v1
+#      with:
+#        go-version: 1.13.x
+#    - name: Checkout code
+#      uses: actions/checkout@v1
 
-    - name: fuzz regression tests
-      run: export PATH="$PATH:$(go env GOPATH)/bin"; cd _fuzz/it && ./fuzz-ci local-regression
-    - name: fuzz continuous job
-      run: export PATH="$PATH:$(go env GOPATH)/bin"; cd _fuzz/it && ./fuzz-ci fuzzing
-      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+#    - name: fuzz regression tests
+#      run: export PATH="$PATH:$(go env GOPATH)/bin"; cd _fuzz/it && ./fuzz-ci local-regression
+#    - name: fuzz continuous job
+#      run: export PATH="$PATH:$(go env GOPATH)/bin"; cd _fuzz/it && ./fuzz-ci fuzzing
+#      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
